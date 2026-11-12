@@ -19,3 +19,6 @@ PROJECT_COMPLETION.md
 VERIFICATION.md
 *.tfvars
 *.tfvars.json
+archive/
+MENTOR_NEXT_STEPS.md
+PRIVACY_HANDOFF.md
