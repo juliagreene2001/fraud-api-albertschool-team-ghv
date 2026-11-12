@@ -1,10 +1,12 @@
-"""Service de scoring : GET /health, POST /predict, POST /events.
+"""Service de scoring : GET /health, POST /predict, POST /events, POST /pubsub.
 
 Le modèle et les compteurs journaliers sont chargés une fois par worker, au démarrage.
 """
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -12,8 +14,8 @@ from time import perf_counter
 
 import numpy as np
 import psutil
-from fastapi import FastAPI, Request
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import FastAPI, Request, Response
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 import features as ft
 import scoring
@@ -47,6 +49,19 @@ class PredictResponse(BaseModel):
     worker_pid: int
 
 
+class PushMessage(BaseModel):
+    data: str
+    messageId: str
+    publishTime: str | None = None
+    attributes: dict[str, str] = Field(default_factory=dict)
+
+
+class PushEnvelope(BaseModel):
+    message: PushMessage
+    subscription: str
+    deliveryAttempt: int | None = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     cfg = settings.from_env()
@@ -66,7 +81,12 @@ def _utc_naive(ts: datetime) -> datetime:
 def _arrays(transactions: list[Transaction]):
     ts = np.array([_utc_naive(t.tx_ts) for t in transactions], dtype="datetime64[s]")
     amount = np.array([t.tx_amount for t in transactions], dtype=np.float64)
-    return ts, [t.customer_id for t in transactions], [t.terminal_id for t in transactions], amount
+    return (
+        ts,
+        [t.customer_id for t in transactions],
+        [t.terminal_id for t in transactions],
+        amount,
+    )
 
 
 def _predict(req: PredictRequest, request: Request, record: bool) -> PredictResponse:
@@ -115,3 +135,38 @@ def predict(req: PredictRequest, request: Request) -> PredictResponse:
 def events(req: PredictRequest, request: Request) -> PredictResponse:
     """Score puis enregistre les transactions dans les compteurs du worker (flux)."""
     return _predict(req, request, record=True)
+
+
+def _log(severity: str, message: str, **fields) -> None:
+    # Une ligne JSON sur stdout : Cloud Logging la lit comme jsonPayload.
+    print(json.dumps({"severity": severity, "message": message, **fields}), flush=True)
+
+
+@app.post("/pubsub", status_code=204)
+def pubsub(envelope: PushEnvelope, request: Request) -> Response:
+    """Message Pub/Sub en push : score sans rien mémoriser, puis acquitte par un 204.
+
+    Tout code autre que 2xx fait rejouer le message, puis le mène à la file des messages morts.
+    """
+    ids = {
+        "message_id": envelope.message.messageId,
+        "delivery_attempt": envelope.deliveryAttempt,
+    }
+    try:
+        payload = json.loads(base64.b64decode(envelope.message.data, validate=True))
+    except ValueError:
+        _log("ERROR", "rejected", reason="malformed", **ids)
+        return Response(status_code=400)
+    try:
+        tx = Transaction.model_validate(payload)
+    except ValidationError:
+        tx_id = payload.get("TX_ID") if isinstance(payload, dict) else None
+        _log("ERROR", "rejected", tx_id=tx_id, reason="invalid", **ids)
+        return Response(status_code=422)
+    score = (
+        _predict(PredictRequest(transactions=[tx]), request, record=False)
+        .scores[0]
+        .score
+    )
+    _log("INFO", "scored", tx_id=tx.tx_id, score=score, **ids)
+    return Response(status_code=204)
