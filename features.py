@@ -1,11 +1,11 @@
-"""Features de scoring calculées à la date de la transaction, à partir de compteurs journaliers.
+"""Scoring features computed at the transaction date from daily counters.
 
-Une seule implémentation sert l'entraînement (des millions de lignes) et le service (une ligne).
+The same implementation supports training (millions of rows) and serving (one row).
 
-Règles de disponibilité, pour une transaction du jour J :
-- compteurs client et terminal : jours J-w à J-1 (le jour J lui-même n'est jamais lu) ;
-- taux de fraude du terminal : jours J-w-LABEL_DELAY_DAYS à J-1-LABEL_DELAY_DAYS, car le label
-  d'une transaction n'est connu que LABEL_DELAY_DAYS jours après elle.
+Availability rules for a transaction on day D:
+- customer and terminal counters: days D-w through D-1 (day D itself is never read);
+- terminal fraud rate: days D-w-LABEL_DELAY_DAYS through D-1-LABEL_DELAY_DAYS, because a
+  transaction label becomes available only LABEL_DELAY_DAYS days after the transaction.
 """
 
 from __future__ import annotations
@@ -33,8 +33,8 @@ def feature_names() -> list[str]:
 
 
 class DailyCounts:
-    """Compteurs journaliers par entité, stockés en sommes cumulées : cum[col][e, j] est le total
-    des jours 0 à j-1 de l'entité e. Une fenêtre est une différence de deux cases."""
+    """Daily counters per entity, stored as cumulative sums: cum[col][e, j] is the total
+    for entity e over days 0 through j-1. A window is the difference between two entries."""
 
     def __init__(self, ids: np.ndarray, n_days: int, columns: tuple[str, ...]):
         self.index = {v: i for i, v in enumerate(ids.tolist())}
@@ -54,14 +54,14 @@ class DailyCounts:
         return out
 
     def rows(self, ids) -> np.ndarray:
-        """Ligne de chaque identifiant ; les inconnus pointent sur la dernière, toujours vide."""
+        """Row for each ID; unknown IDs map to the final row, which is always empty."""
         unknown = len(self.index)
         return np.fromiter(
             (self.index.get(i, unknown) for i in ids), dtype=np.int64, count=len(ids)
         )
 
     def window(self, col: str, rows: np.ndarray, end: np.ndarray, w: int) -> np.ndarray:
-        """Total des w jours qui précèdent le jour `end` (exclu)."""
+        """Total for the w days preceding day `end` (exclusive)."""
         hi = np.clip(end, 0, self.n_days)
         lo = np.clip(hi - w, 0, self.n_days)
         c = self.cum[col]
@@ -84,7 +84,7 @@ class State:
         return (ts.astype("datetime64[D]") - self.day0).astype(np.int64)
 
     def add_transaction(self, ts: np.datetime64, customer_id: str, terminal_id: str, amount: float):
-        """Enregistre une transaction du flux : elle compte dans les fenêtres dès le lendemain."""
+        """Record a stream transaction; it contributes to windows starting the next day."""
         day = int(self.day_index(np.asarray(ts)))
         self.customers.add("n", customer_id, day, 1.0)
         self.customers.add("amount_sum", customer_id, day, amount)
@@ -98,8 +98,8 @@ def _days(table, day0: np.datetime64) -> np.ndarray:
 
 
 def load_state(data_dir: Path, horizon_days: int = 0) -> State:
-    """Charge les compteurs journaliers ; `horizon_days` réserve des jours vides après le dernier
-    jour connu, que le flux remplira."""
+    """Load daily counters; `horizon_days` reserves empty days after the last known day
+    for incoming stream transactions."""
     cust = pq.read_table(data_dir / CUSTOMER_FILE)
     term = pq.read_table(data_dir / TERMINAL_FILE)
     first = min(cust["day"].to_numpy().min(), term["day"].to_numpy().min()).astype("datetime64[D]")
@@ -124,10 +124,10 @@ def load_state(data_dir: Path, horizon_days: int = 0) -> State:
 def compute(
     state: State, ts: np.ndarray, customer_ids, terminal_ids, amount: np.ndarray
 ) -> np.ndarray:
-    """Matrice (B, F) float32 dans l'ordre de feature_names().
+    """Return a (B, F) float32 matrix in feature_names() order.
 
-    `ts` est un tableau datetime64 en UTC. Une transaction postérieure au dernier jour connu lit
-    les fenêtres qui se terminent à ce dernier jour.
+    `ts` is a UTC datetime64 array. Transactions after the last known day read windows
+    ending at that last known day.
     """
     ts = ts.astype("datetime64[s]")
     amount = amount.astype(np.float64)

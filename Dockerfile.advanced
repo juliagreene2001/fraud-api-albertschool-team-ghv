@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
-# Variante avancée : image de runtime distroless (ni shell ni apt), cache de build uv.
+# Advanced variant: distroless runtime image (no shell or apt), with uv build caching.
 #   docker build -f Dockerfile.advanced --platform linux/amd64 -t fraud-api:advanced .
 
-# ---- Étape 1 : build — même Debian et même Python (3.13) que l'image de runtime
+# ---- Stage 1: build — same Debian and Python (3.13) as the runtime image
 FROM debian:trixie-slim AS build
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 libgomp1 ca-certificates \
@@ -19,10 +19,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-default-groups --no-install-project \
       --no-install-package nvidia-nccl-cu13
 
-# ---- Étape 2 : runtime — distroless, sans shell ni apt, utilisateur nonroot
+# ---- Stage 2: runtime — distroless, no shell or apt, running as nonroot
 FROM gcr.io/distroless/python3-debian13:nonroot AS runtime
 WORKDIR /app
-# OpenMP pour XGBoost : pas d'apt ici, on copie la bibliothèque depuis l'étape de build
+# OpenMP for XGBoost: no apt here, so copy the library from the build stage
 COPY --from=build /usr/lib/*-linux-gnu/libgomp.so.1 /usr/lib/
 COPY --from=build /app/.venv /app/.venv
 COPY models/model.ubj models/features.json ./models/

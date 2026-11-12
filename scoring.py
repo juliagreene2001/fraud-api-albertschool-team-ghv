@@ -1,4 +1,4 @@
-"""Chemin métier unique : features -> prédiction, utilisé par l'API, l'entraînement et les tests."""
+"""Shared scoring path: features -> prediction, usable by the API, training, and tests."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def score(
     terminal_ids,
     amount: np.ndarray,
 ) -> tuple[np.ndarray, Timings]:
-    """Scores dans l'ordre d'entrée, avec les durées par étape (secondes)."""
+    """Return scores in input order and per-stage execution times in seconds."""
     t0 = perf_counter()
     X = ft.compute(state, ts, customer_ids, terminal_ids, amount)
     t1 = perf_counter()

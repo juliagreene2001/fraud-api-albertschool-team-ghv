@@ -57,6 +57,6 @@ def test_empty_batch(client):
     assert client.post("/predict", json={"transactions": []}).json()["scores"] == []
 
 
-@pytest.mark.parametrize("patch", [{"tx_amount": 0}, {"tx_ts": "hier"}, {"customer_id": None}])
+@pytest.mark.parametrize("patch", [{"tx_amount": 0}, {"tx_ts": "yesterday"}, {"customer_id": None}])
 def test_invalid_transaction_is_rejected(client, replay, patch):
     assert client.post("/predict", json={"transactions": [replay[0] | patch]}).status_code == 422

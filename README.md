@@ -1,69 +1,78 @@
-# TD 2 — Service de scoring de fraude
+# Team GHV fraud-scoring API
 
-Un modèle XGBoost **déjà entraîné** score des transactions de carte bancaire. Les données viennent de
-FraudFinder, un jeu public de Google : 111 millions de transactions simulées, 2 % de fraude. Le
-service est écrit avec FastAPI et livré avec son `Dockerfile`.
+A supplied XGBoost model scores payment transactions through FastAPI. Uvicorn runs the HTTP server.
+The companion [GHV infrastructure](https://github.com/juliagreene2001/ai-cloud-infra-terraform-team-ghv)
+configures private Cloud Run deployment and shared Terraform state.
 
-## Ce que fait le service
+## Run locally
 
-`POST /predict` reçoit des transactions et renvoie un score de fraude entre 0 et 1 pour chacune.
+Use Python 3.13 and uv. Obtain the three course Parquet files separately; Git tracks only their
+checksum manifest. On macOS, XGBoost may require `brew install libomp`.
 
 ```bash
-curl -X POST localhost:8000/predict -H "Content-Type: application/json" -d '{
-  "transactions": [{
-    "tx_id": "8d2715f36c3b6983b28cb4931b4f3ad1d7af706d",
-    "tx_ts": "2026-10-01T09:02:07",
-    "customer_id": "3540440915461489",
-    "terminal_id": "00064542",
-    "tx_amount": 22.48
-  }]
-}'
+uv sync --frozen
+(cd data && shasum -a 256 -c CHECKSUMS.sha256)
+uv run --frozen pytest -q -ra
+uv run --frozen uvicorn app:app --host 127.0.0.1 --port 8000
 ```
 
-Le score dépend de 20 variables, calculées à partir de la transaction et de compteurs journaliers :
+Use `sha256sum` instead of `shasum -a 256` on Linux. Runtime needs `customer_daily.parquet` and
+`terminal_daily.parquet`; reference tests additionally need `replay.parquet`. The course files are
+available in `gs://advanced-cloud-ai-models/data/` to authorized course accounts.
 
-| Famille | Variables | Source |
-| --- | --- | --- |
-| Transaction | montant, heure, jour de la semaine | la demande |
-| Client | nombre de transactions et montant moyen sur 1, 7 et 14 jours, rapport du montant à cette moyenne | `data/customer_daily.parquet` |
-| Terminal | nombre de transactions sur 1, 7 et 14 jours, taux de fraude connu avec 7 jours de retard | `data/terminal_daily.parquet` |
+## Endpoints
 
-Les compteurs s'arrêtent au 30 septembre 2026. Les transactions à scorer commencent le 1er octobre
-2026 (`data/replay.parquet`).
-
-## Fichiers
-
-| Fichier | Rôle |
+| Method / path | Behavior |
 | --- | --- |
-| `app.py` | service FastAPI |
-| `features.py` | compteurs journaliers et calcul des 20 variables |
-| `scoring.py` | chargement du modèle, calcul des scores |
-| `settings.py` | variables `DATA_DIR`, `MODELS_DIR`, `XGB_NTHREAD` |
-| `models/` | modèle, liste des variables, scores de référence |
-| `tests/` | tests du service |
+| `GET /health` | Report loaded state and worker information |
+| `POST /predict` | Score a transaction batch without recording counters |
+| `POST /events` | Score a batch, then update that worker's in-memory counters |
+| `GET /docs` | Interactive request/response documentation |
 
-Le modèle est dans l'image. Les fichiers de `data/` n'y sont pas : le service les lit dans le dossier
-`DATA_DIR`.
-
-## Installation
+From another terminal:
 
 ```bash
-uv sync
-uv run uvicorn app:app --port 8000
+curl http://127.0.0.1:8000/health
+curl -X POST http://127.0.0.1:8000/predict -H "Content-Type: application/json" --data-binary @examples/transaction.json
 ```
 
-Placez dans `data/` les trois fichiers parquet indiqués par l'enseignant.
+The example uses synthetic course identifiers. Identifiers are strings to preserve leading zeros.
+The model uses 20 inputs, including daily customer/terminal windows and delayed fraud labels.
+It returns risk scores; threshold-based approval/blocking is a separate decision.
 
-## Image
+## Container
 
 ```bash
-docker build --platform linux/amd64 -t fraud-api .
-docker run --rm -p 8000:8000 -v "$PWD/data:/app/data:ro" fraud-api
+docker build --platform linux/amd64 -t team-ghv-fraud-api:lab .
+docker run --rm -p 127.0.0.1:18000:8000 -v "$PWD/data:/app/data:ro" team-ghv-fraud-api:lab
 ```
 
-Variante avancée, `Dockerfile.advanced` : image de runtime distroless (ni shell ni gestionnaire de
-paquets, utilisateur `nonroot`), cache de build uv, contrôle de santé intégré.
+The model is included in the image; historical data is external. The standard Dockerfile honors
+`PORT`, defaulting to 8000. The advanced distroless variant fixes port 8000.
 
-```bash
-docker build -f Dockerfile.advanced --platform linux/amd64 -t fraud-api:advanced .
-```
+## Verification and measurements
+
+- `scripts/check_http.py`: check live health and 500 reference predictions; `--private` also checks
+  anonymous rejection and uses an identity token held in memory.
+- `scripts/measure_http.py`: save raw client latency samples, p50/p99 and failures.
+- `scripts/collect_cloud_metrics.py`: fetch service/revision metrics and matching startup logs.
+
+Use the development environment installed by `uv sync --frozen`. HTTPS tools verify certificates
+using certifi. Pull-request CI runs synthetic feature tests and lint without course data or cloud
+credentials. Run the full data-dependent tests separately; skipped integration tests are reported.
+
+## State and deployment limits
+
+`/events` updates are per-worker memory, lost on restart and not shared across instances. It does not
+deduplicate IDs, add unknown entities, persist labels, or extend its allocated horizon indefinitely.
+The lab uses one worker and one XGBoost thread. Scaling stateful event processing needs additional design.
+
+The optional manual deployment workflow is gated off by default. Activating it requires explicit
+WIF/deployment-account settings and coordinated image ownership with Terraform. Ordinary PR checks
+and merges do not deploy to Google Cloud. Raw results, local configuration and personal notes stay ignored.
+
+## Next lesson: Session 3
+
+Continue on branch `Ali`. The latest [Session 3 instructions](https://github.com/juliagreene2001/ai-cloud-infra-terraform-team-ghv/blob/Ali/docs/seance-3.md)
+introduce authenticated Pub/Sub push delivery. The `/pubsub` endpoint is not implemented yet.
+Complete it and its tests in a separate reviewed change before connecting a live stream.

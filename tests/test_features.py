@@ -9,7 +9,7 @@ LAST = 29
 
 
 def make_state(cust_daily: np.ndarray, term_n: np.ndarray, term_fraud: np.ndarray) -> ft.State:
-    """Un client "c" et un terminal "t" ; un tableau de valeurs par jour (N_DAYS cases)."""
+    """One customer "c" and terminal "t"; one array of daily values (N_DAYS entries)."""
     days = np.arange(N_DAYS)
     customers = ft.DailyCounts.from_table(
         np.full(N_DAYS, "c"), days, {"n": cust_daily, "amount_sum": cust_daily * 10.0}, N_DAYS
@@ -42,7 +42,7 @@ def test_names_match_matrix_width(state):
 def test_raw_features():
     f = features_on(make_state(np.ones(N_DAYS), np.ones(N_DAYS), np.zeros(N_DAYS)), 2)
     assert f["hour"] == 13
-    assert f["weekday"] == 5 and f["is_weekend"] == 1  # 2026-01-03 est un samedi
+    assert f["weekday"] == 5 and f["is_weekend"] == 1  # 2026-01-03 is a Saturday
     assert f["log_amount"] == pytest.approx(np.log1p(20.0))
 
 
@@ -58,10 +58,10 @@ def test_windows_read_only_previous_days():
 
 def test_fraud_rate_waits_for_the_label_delay():
     n, fraud = np.full(N_DAYS, 10.0), np.zeros(N_DAYS)
-    fraud[13:20] = 10  # fraudes des 7 jours précédents : labels pas encore connus
+    fraud[13:20] = 10  # fraud in the previous 7 days: labels are not yet available
     f = features_on(make_state(n, n, fraud), 20)
     assert f["term_fraud_rate_1d"] == f["term_fraud_rate_14d"] == 0
-    fraud[12] = 5  # J-8 : premier jour dont le label est connu
+    fraud[12] = 5  # D-8: the most recent day whose label is available
     f = features_on(make_state(n, n, fraud), 20)
     assert f["term_fraud_rate_1d"] == pytest.approx(0.5)
     assert f["term_fraud_rate_7d"] == pytest.approx(5 / 70)

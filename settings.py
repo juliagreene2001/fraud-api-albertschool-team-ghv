@@ -1,4 +1,4 @@
-"""Configuration d'exécution lue dans l'environnement."""
+"""Runtime configuration read from environment variables."""
 
 from __future__ import annotations
 

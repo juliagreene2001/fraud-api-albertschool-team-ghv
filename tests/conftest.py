@@ -9,8 +9,16 @@ DATA = ROOT / "data"
 MODELS = ROOT / "models"
 
 needs_data = pytest.mark.skipif(
-    not (DATA / "replay.parquet").exists() or not (MODELS / "model.ubj").exists(),
-    reason="data/ ou models/ absents",
+    not all(
+        path.exists()
+        for path in (
+            DATA / "customer_daily.parquet",
+            DATA / "terminal_daily.parquet",
+            DATA / "replay.parquet",
+            MODELS / "model.ubj",
+        )
+    ),
+    reason="Required history, replay, or model files are missing",
 )
 
 
@@ -21,7 +29,7 @@ def golden() -> dict:
 
 @pytest.fixture(scope="session")
 def replay() -> list[dict]:
-    """Les premières transactions du rejeu, au format JSON de l'API."""
+    """The first replay transactions, in the API's JSON format."""
     rows = pq.read_table(DATA / "replay.parquet").slice(0, 500).to_pylist()
     return [
         {
