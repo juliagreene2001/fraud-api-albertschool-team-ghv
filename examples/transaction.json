@@ -1,0 +1,11 @@
+{
+  "transactions": [
+    {
+      "tx_id": "example-001",
+      "tx_ts": "2026-10-01T09:02:07",
+      "customer_id": "3540440915461489",
+      "terminal_id": "00064542",
+      "tx_amount": 22.48
+    }
+  ]
+}

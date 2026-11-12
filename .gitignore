@@ -7,3 +7,15 @@ results/
 .pytest_cache/
 .ruff_cache/
 .DS_Store
+
+# Private local study, audit, configuration, and raw evidence
+docs/evidence/
+docs/archive/
+docs/private/
+local-notes/
+LEARNING_GUIDE.md
+CORRECTION_REPORT.md
+PROJECT_COMPLETION.md
+VERIFICATION.md
+*.tfvars
+*.tfvars.json

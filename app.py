@@ -1,6 +1,6 @@
-"""Service de scoring : GET /health, POST /predict, POST /events.
+"""Scoring service: GET /health, POST /predict, POST /events.
 
-Le modèle et les compteurs journaliers sont chargés une fois par worker, au démarrage.
+The model and daily counters are loaded once per worker at startup.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ import settings
 
 
 class Transaction(BaseModel):
-    """Une transaction FraudFinder ; les noms en majuscules du flux (TX_ID...) sont acceptés."""
+    """A FraudFinder transaction; uppercase stream field names (TX_ID...) are accepted."""
 
     model_config = ConfigDict(alias_generator=str.upper, populate_by_name=True)
 
@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="TD2 fraud API", lifespan=lifespan)
+app = FastAPI(title="Lab 2 fraud API", lifespan=lifespan)
 
 
 def _utc_naive(ts: datetime) -> datetime:
@@ -107,11 +107,11 @@ def health(request: Request):
 
 @app.post("/predict", response_model=PredictResponse)
 def predict(req: PredictRequest, request: Request) -> PredictResponse:
-    """Score sans rien mémoriser : deux appels identiques donnent la même réponse."""
+    """Score without updating counters; equal inputs yield equal scores while state is unchanged."""
     return _predict(req, request, record=False)
 
 
 @app.post("/events", response_model=PredictResponse)
 def events(req: PredictRequest, request: Request) -> PredictResponse:
-    """Score puis enregistre les transactions dans les compteurs du worker (flux)."""
+    """Score, then record transactions in this worker's counters for stream processing."""
     return _predict(req, request, record=True)
