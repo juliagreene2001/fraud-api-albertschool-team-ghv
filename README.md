@@ -70,3 +70,9 @@ The lab uses one worker and one XGBoost thread. Scaling stateful event processin
 The optional manual deployment workflow is gated off by default. Activating it requires explicit
 WIF/deployment-account settings and coordinated image ownership with Terraform. Ordinary PR checks
 and merges do not deploy to Google Cloud. Raw results, local configuration and personal notes stay ignored.
+
+## Next lesson: Session 3
+
+Continue on branch `Ali`. The latest [Session 3 instructions](https://github.com/juliagreene2001/ai-cloud-infra-terraform-team-ghv/blob/Ali/docs/seance-3.md)
+introduce authenticated Pub/Sub push delivery. The `/pubsub` endpoint is not implemented yet.
+Complete it and its tests in a separate reviewed change before connecting a live stream.
