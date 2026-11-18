@@ -27,6 +27,7 @@ available in `gs://advanced-cloud-ai-models/data/` to authorized course accounts
 | `GET /health` | Report loaded state and worker information |
 | `POST /predict` | Score a transaction batch without recording counters |
 | `POST /events` | Score a batch, then update that worker's in-memory counters |
+| `POST /pubsub` | Decode a Pub/Sub envelope, validate and score without changing counters, log, then acknowledge with 204 |
 | `GET /docs` | Interactive request/response documentation |
 
 From another terminal:
@@ -71,8 +72,16 @@ The optional manual deployment workflow is gated off by default. Activating it r
 WIF/deployment-account settings and coordinated image ownership with Terraform. Ordinary PR checks
 and merges do not deploy to Google Cloud. Raw results, local configuration and personal notes stay ignored.
 
-## Next lesson: Session 3
+## Session 3: Pub/Sub delivery
 
-Continue on branch `Ali`. The latest [Session 3 instructions](https://github.com/juliagreene2001/ai-cloud-infra-terraform-team-ghv/blob/Ali/docs/seance-3.md)
-introduce authenticated Pub/Sub push delivery. The `/pubsub` endpoint is not implemented yet.
-Complete it and its tests in a separate reviewed change before connecting a live stream.
+Branch `Ali` integrates the team's `/pubsub` implementation and tests while retaining the English
+documentation, verification scripts and existing workflows. See the [Session 3 instructions](https://github.com/juliagreene2001/ai-cloud-infra-terraform-team-ghv/blob/Ali/docs/seance-3.md).
+Logs include `tx_id`, `message_id`, `delivery_attempt`, and either the score or rejection reason.
+Invalid transactions and malformed encoded JSON return 422 with a readable error description.
+Scoring failures are not acknowledged; successful redeliveries leave daily counters unchanged.
+
+Local tests use the local course data and need no cloud login. Cloud deployment remains in project
+`advanced-cloud-ai`, under the `team-ghv` namespace. The deployment helper uses the operator's existing
+gcloud login; merging a contributor's code does not change that login or select their account.
+Building, publishing and deploying a new image are separate steps. The instructor's replay
+measurements and completed report are still required.

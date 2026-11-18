@@ -1,10 +1,12 @@
-"""Scoring service: GET /health, POST /predict, POST /events.
+"""Scoring service: GET /health, POST /predict, POST /events, POST /pubsub.
 
 The model and daily counters are loaded once per worker at startup.
 """
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -12,8 +14,8 @@ from time import perf_counter
 
 import numpy as np
 import psutil
-from fastapi import FastAPI, Request
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import FastAPI, HTTPException, Request, Response
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 import features as ft
 import scoring
@@ -47,6 +49,19 @@ class PredictResponse(BaseModel):
     worker_pid: int
 
 
+class PushMessage(BaseModel):
+    data: str
+    messageId: str
+    publishTime: str | None = None
+    attributes: dict[str, str] = Field(default_factory=dict)
+
+
+class PushEnvelope(BaseModel):
+    message: PushMessage
+    subscription: str
+    deliveryAttempt: int | None = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     cfg = settings.from_env()
@@ -66,7 +81,12 @@ def _utc_naive(ts: datetime) -> datetime:
 def _arrays(transactions: list[Transaction]):
     ts = np.array([_utc_naive(t.tx_ts) for t in transactions], dtype="datetime64[s]")
     amount = np.array([t.tx_amount for t in transactions], dtype=np.float64)
-    return ts, [t.customer_id for t in transactions], [t.terminal_id for t in transactions], amount
+    return (
+        ts,
+        [t.customer_id for t in transactions],
+        [t.terminal_id for t in transactions],
+        amount,
+    )
 
 
 def _predict(req: PredictRequest, request: Request, record: bool) -> PredictResponse:
@@ -115,3 +135,42 @@ def predict(req: PredictRequest, request: Request) -> PredictResponse:
 def events(req: PredictRequest, request: Request) -> PredictResponse:
     """Score, then record transactions in this worker's counters for stream processing."""
     return _predict(req, request, record=True)
+
+
+def _log(severity: str, message: str, **fields) -> None:
+    # Cloud Logging reads a single JSON line on stdout as jsonPayload.
+    print(json.dumps({"severity": severity, "message": message, **fields}), flush=True)
+
+
+@app.post("/pubsub", status_code=204)
+def pubsub(envelope: PushEnvelope, request: Request) -> Response:
+    """Score a pushed transaction without changing counters, then acknowledge with 204.
+
+    Rejected or failed work remains unacknowledged so Pub/Sub can retry delivery.
+    """
+    ids = {
+        "message_id": envelope.message.messageId,
+        "delivery_attempt": envelope.deliveryAttempt,
+    }
+    try:
+        payload = json.loads(base64.b64decode(envelope.message.data, validate=True))
+    except ValueError as exc:
+        _log("ERROR", "rejected", tx_id=None, reason="malformed", **ids)
+        raise HTTPException(status_code=422, detail="Invalid encoded JSON") from exc
+    try:
+        tx = Transaction.model_validate(payload)
+    except ValidationError as exc:
+        tx_id = (
+            payload.get("TX_ID", payload.get("tx_id"))
+            if isinstance(payload, dict)
+            else None
+        )
+        _log("ERROR", "rejected", tx_id=tx_id, reason="invalid", **ids)
+        raise HTTPException(status_code=422, detail="Invalid transaction") from exc
+    score = (
+        _predict(PredictRequest(transactions=[tx]), request, record=False)
+        .scores[0]
+        .score
+    )
+    _log("INFO", "scored", tx_id=tx.tx_id, score=score, **ids)
+    return Response(status_code=204)
